@@ -1,0 +1,35 @@
+name: Monthly Aggregate
+
+on:
+  schedule:
+    - cron: "0 0 1 * *"   # 매월 1일 UTC 00:00 = KST 09:00 (전월 집계)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run monthly aggregate
+        run: python monthly_aggregate.py
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/monthly/
+          git diff --cached --quiet && exit 0
+          git commit -m "data: 월별취합"
+          git pull --rebase
+          git push
