@@ -67,6 +67,10 @@ def crawl_oliveyoung() -> list[dict]:
                 href = el.find_element(By.CSS_SELECTOR, "a").get_attribute("href") or ""
             except Exception:
                 href = ""
+            try:
+                image = el.find_element(By.CSS_SELECTOR, "img").get_attribute("src") or ""
+            except Exception:
+                image = ""
 
             items.append(
                 {
@@ -74,6 +78,7 @@ def crawl_oliveyoung() -> list[dict]:
                     "name": text_of("p.tx_name"),
                     "price": text_of(".tx_cur").rstrip("~").strip(),
                     "href": href,
+                    "image": image,
                 }
             )
     finally:
@@ -91,6 +96,7 @@ def crawl_oliveyoung() -> list[dict]:
                 "브랜드": item["brand"],
                 "가격": item["price"],
                 "상품URL": item["href"],
+                "이미지URL": item["image"],
             }
         )
     return results

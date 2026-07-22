@@ -34,6 +34,7 @@ def crawl_daiso() -> list[dict]:
 
         for item in items:
             item["brand"] = ""
+            item["image"] = ""
             if not item["href"]:
                 continue
             detail_page = page.context.new_page()
@@ -43,6 +44,9 @@ def crawl_daiso() -> list[dict]:
                 item["brand"] = detail_page.eval_on_selector(
                     ".brand-area .detail-title", "el => el.innerText.trim()"
                 )
+                item["image"] = detail_page.eval_on_selector(
+                    "meta[property='og:image']", "el => el.content"
+                ) or ""
             except Exception:
                 pass
             finally:
@@ -60,6 +64,7 @@ def crawl_daiso() -> list[dict]:
                 "브랜드": item["brand"],
                 "가격": item["price"],
                 "상품URL": BASE_URL + item["href"] if item["href"] else "",
+                "이미지URL": item["image"],
             }
         )
     return results
