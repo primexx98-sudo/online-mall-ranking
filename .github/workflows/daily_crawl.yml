@@ -2,7 +2,7 @@ name: Daily Crawl
 
 on:
   schedule:
-    - cron: "0 0 * * *"   # 매일 UTC 00:00 = KST 09:00
+    - cron: "3 0 * * *"   # 매일 UTC 00:03 = KST 09:03 (정각 지연 회피 + health-trend 09:13 수집 전에 데이터 확보되도록)
   workflow_dispatch:
 
 permissions:
