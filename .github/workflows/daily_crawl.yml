@@ -2,7 +2,7 @@ name: Daily Crawl
 
 on:
   schedule:
-    - cron: "3 0 * * *"   # 매일 UTC 00:03 = KST 09:03 (정각 지연 회피 + health-trend 09:13 수집 전에 데이터 확보되도록)
+    - cron: "7 1 * * *"   # 매일 UTC 01:07 = KST 10:07 (올리브영·다이소몰·카카오 선물하기 랭킹이 매일 오전 10시경 갱신되므로, 그 이후에 돌아야 그날 실제 랭킹을 정확히 수집함. health-trend 09:13 수집보다는 늦어져서 항상 전일 데이터로 표시되지만 그게 실제로 맞는 데이터임)
   workflow_dispatch:
 
 permissions:
