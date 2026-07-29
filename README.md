@@ -11,7 +11,6 @@
 
 ```bash
 pip install -r requirements.txt
-playwright install chromium
 
 python main.py               # 오늘 날짜로 수집
 streamlit 대시보드는 이번 버전에 없음 — data/ 아래 xlsx 파일을 직접 확인

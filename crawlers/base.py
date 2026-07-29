@@ -1,9 +1,9 @@
-"""Playwright 공통 유틸. 모든 크롤러가 동일한 브라우저 컨텍스트 설정을 공유한다."""
+"""Selenium 공통 유틸. 모든 크롤러가 동일한 브라우저 옵션을 공유한다."""
 
 from contextlib import contextmanager
 
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -12,13 +12,23 @@ USER_AGENT = (
 
 
 @contextmanager
-def new_page():
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(user_agent=USER_AGENT, locale="ko-KR")
-        Stealth().apply_stealth_sync(context)
-        page = context.new_page()
-        try:
-            yield page
-        finally:
-            browser.close()
+def new_driver():
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--lang=ko-KR")
+    options.add_argument(f"user-agent={USER_AGENT}")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+
+    driver = webdriver.Chrome(options=options)
+    driver.execute_cdp_cmd(
+        "Page.addScriptToEvaluateOnNewDocument",
+        {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"},
+    )
+    try:
+        yield driver
+    finally:
+        driver.quit()

@@ -8,36 +8,13 @@ manual_oliveyoung.py로 캡쳐 기반 수동 입력 (크롤러_실패시.md 참�
 
 import time
 
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 
+from crawlers.base import new_driver
 from crawlers.classifier import classify
 from crawlers.config import PLATFORMS
 
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-)
 ITEM_SELECTOR = "ul.cate_prd_list > li"
-
-
-def _new_driver() -> webdriver.Chrome:
-    options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument(f"user-agent={USER_AGENT}")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option("useAutomationExtension", False)
-
-    driver = webdriver.Chrome(options=options)
-    driver.execute_cdp_cmd(
-        "Page.addScriptToEvaluateOnNewDocument",
-        {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"},
-    )
-    return driver
 
 
 def crawl_oliveyoung() -> list[dict]:
@@ -45,8 +22,7 @@ def crawl_oliveyoung() -> list[dict]:
     top_n = config["top_n"]
     url = f"{config['url']}&pageIdx=1&rowsPerPage={top_n}"
 
-    driver = _new_driver()
-    try:
+    with new_driver() as driver:
         driver.get(url)
         time.sleep(8)
 
@@ -81,8 +57,6 @@ def crawl_oliveyoung() -> list[dict]:
                     "image": image,
                 }
             )
-    finally:
-        driver.quit()
 
     results = []
     for rank, item in enumerate(items, start=1):

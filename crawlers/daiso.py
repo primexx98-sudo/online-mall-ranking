@@ -1,56 +1,71 @@
-"""다이소몰 건강식품 실시간 랭킹 크롤러 (Playwright).
+"""다이소몰 건강식품 실시간 랭킹 크롤러 (Selenium).
 
 목록 카드에는 브랜드가 없어 TOP N 상세페이지를 추가 방문해 브랜드를 보강한다.
 """
 
-from crawlers.base import new_page
+import time
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+
+from crawlers.base import new_driver
 from crawlers.classifier import classify
 from crawlers.config import PLATFORMS
 
 BASE_URL = "https://www.daisomall.co.kr"
 RANK_SELECTOR = ".nav-rank .swiper-slide"
 
+_EXTRACT_JS = """
+    return Array.from(document.querySelectorAll('.nav-rank .swiper-slide')).map(el => ({
+        name: el.querySelector('.product-title')?.innerText?.trim() || '',
+        price: el.querySelector('.price-value')?.innerText?.replace(/\\s+/g, '') || '',
+        href: el.querySelector('a.detail-link')?.getAttribute('href') || '',
+    }));
+"""
+
+_DETAIL_JS = """
+    return {
+        brand: document.querySelector('.brand-area .detail-title')?.innerText?.trim() || '',
+        image: document.querySelector("meta[property='og:image']")?.content || '',
+    };
+"""
+
 
 def crawl_daiso() -> list[dict]:
     config = PLATFORMS["다이소몰"]
     top_n = config["top_n"]
 
-    with new_page() as page:
-        page.goto(config["url"], timeout=30000)
-        page.wait_for_selector(RANK_SELECTOR, timeout=15000)
-        page.wait_for_timeout(1500)
-
-        items = page.eval_on_selector_all(
-            RANK_SELECTOR,
-            """
-            els => els.map(el => ({
-                name: el.querySelector('.product-title')?.innerText?.trim() || '',
-                price: el.querySelector('.price-value')?.innerText?.replace(/\\s+/g, '') || '',
-                href: el.querySelector('a.detail-link')?.getAttribute('href') || '',
-            }))
-            """,
+    with new_driver() as driver:
+        driver.get(config["url"])
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, RANK_SELECTOR))
         )
-        items = items[:top_n]
+        time.sleep(1.5)
 
+        items = driver.execute_script(_EXTRACT_JS)[:top_n]
+
+        main_window = driver.current_window_handle
         for item in items:
             item["brand"] = ""
             item["image"] = ""
             if not item["href"]:
                 continue
-            detail_page = page.context.new_page()
+
+            driver.switch_to.new_window("tab")
             try:
-                detail_page.goto(BASE_URL + item["href"], timeout=20000)
-                detail_page.wait_for_selector(".brand-area .detail-title", timeout=8000)
-                item["brand"] = detail_page.eval_on_selector(
-                    ".brand-area .detail-title", "el => el.innerText.trim()"
+                driver.get(BASE_URL + item["href"])
+                WebDriverWait(driver, 8).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, ".brand-area .detail-title"))
                 )
-                item["image"] = detail_page.eval_on_selector(
-                    "meta[property='og:image']", "el => el.content"
-                ) or ""
+                detail = driver.execute_script(_DETAIL_JS)
+                item["brand"] = detail["brand"]
+                item["image"] = detail["image"]
             except Exception:
                 pass
             finally:
-                detail_page.close()
+                driver.close()
+                driver.switch_to.window(main_window)
 
     results = []
     for rank, item in enumerate(items, start=1):
