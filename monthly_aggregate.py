@@ -2,6 +2,7 @@ from pathlib import Path
 from datetime import date
 from collections import defaultdict
 from crawlers.classifier import classify, ALL_CATEGORIES, PLATFORMS as PLATFORM_NAMES
+import re
 import pandas as pd
 
 
@@ -12,6 +13,82 @@ COLUMNS_OUT = [
     "평균순위", "전월순위", "순위변동",
     "등장횟수",
 ]
+
+# 베이지안 스무딩 가상표본 수. 등장횟수가 이 값보다 훨씬 적은 상품은 점수가 전체 평균
+# 쪽으로 강하게 당겨지고, 이 값보다 훨씬 많으면 원래 평균점수에 거의 수렴한다.
+BAYESIAN_K = 5
+
+# 상품URL에서 플랫폼별 고유 상품코드를 뽑아내는 패턴. 상세페이지 제목은 프로모션 문구 때문에
+# 거의 매일 바뀌지만(예: "7입"→"8입(7+1)", "독일 명품 비타민" 접두사 추가/삭제 등) URL 속
+# 상품코드는 실제로 다른 상품이 등록되지 않는 한 고정이라 동일 상품 판별에 훨씬 안전하다.
+_PRODUCT_ID_PATTERNS = {
+    "올리브영":     re.compile(r"goodsNo=([A-Za-z0-9]+)"),
+    "다이소몰":     re.compile(r"[?&]pdNo=(\d+)"),
+    "카카오선물하기": re.compile(r"/product/(\d+)"),
+}
+
+
+def extract_product_id(url, platform: str):
+    pattern = _PRODUCT_ID_PATTERNS.get(platform)
+    if pattern is None or not isinstance(url, str):
+        return None
+    m = pattern.search(url)
+    return m.group(1) if m else None
+
+
+def normalize_product_name(name: str) -> str:
+    """상품URL이 없는 행(수동 입력 등)을 위한 대체 키.
+    대괄호 프로모션 태그(예: "[7월 올영픽/1일 1정]")를 통째로 제거하고 공백을 모두
+    없애 "1일 1정"/"1일1정"처럼 표기만 다른 경우를 흡수한다. 대괄호 밖의 실제
+    구성/용량 표기(14입, 30ml, 7입 등)는 그대로 남기 때문에 서로 다른 구성 상품끼리는
+    섞이지 않는다."""
+    if not isinstance(name, str):
+        return ""
+    no_brackets = re.sub(r"\[[^\]]*\]", "", name)
+    return re.sub(r"\s+", "", no_brackets)
+
+
+def row_keys(row, platform: str):
+    """행 하나에서 (id_key, name_key)를 뽑는다. id_key는 상품URL 파싱 실패 시 None."""
+    pid = extract_product_id(row.get("상품URL"), platform)
+    id_key = f"id::{pid}" if pid else None
+    brand = str(row.get("브랜드") or "").strip()
+    name_norm = normalize_product_name(row.get("상품명", ""))
+    if brand and name_norm.startswith(brand):
+        name_norm = name_norm[len(brand):]
+    name_key = f"name::{brand}::{name_norm}"
+    return id_key, name_key
+
+
+class _UnionFind:
+    """id 키와 이름 키를 같은 그룹으로 묶기 위한 최소 union-find.
+    예: 상품URL이 있는 날은 id 키로, 크롤링 실패 등으로 URL이 빠진 날은 이름 키로만
+    잡히는데, 같은 상품이 어느 날은 URL이 있고 어느 날은 없으면 두 키가 한 번이라도
+    같은 행에서 만나야 병합된다. 만난 적 없는 이름 키(예: 상품URL이 매번 빠진 상품)는
+    이름 키 그 자체가 그룹이 된다."""
+    def __init__(self):
+        self.parent = {}
+
+    def find(self, x):
+        self.parent.setdefault(x, x)
+        while self.parent[x] != x:
+            self.parent[x] = self.parent[self.parent[x]]
+            x = self.parent[x]
+        return x
+
+    def union(self, a, b):
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self.parent[ra] = rb
+
+
+def build_group_keys(df: pd.DataFrame, platform: str) -> pd.Series:
+    uf = _UnionFind()
+    pairs = df.apply(lambda r: row_keys(r, platform), axis=1)
+    for id_key, name_key in pairs:
+        if id_key:
+            uf.union(id_key, name_key)
+    return pairs.apply(lambda p: uf.find(p[0] if p[0] else p[1]))
 
 
 def price_to_int(price_str: str) -> float:
@@ -84,13 +161,20 @@ def aggregate_platform(daily_files: list, sheet: str, total_days: int, prev_df: 
     all_data["가격_숫자"] = all_data["가격"].apply(price_to_int)
     # 일별 점수: 1위=5점, 2위=4.5점 ... 10위=0.5점
     all_data["일별점수"] = all_data["순위"].apply(lambda r: (11 - r) * 0.5)
+    # 상품명 텍스트가 날짜마다 흔들려도(프로모션 문구 변경 등) 같은 상품으로 묶이도록
+    # URL 상품코드(우선) 또는 정규화된 이름(대체)으로 그룹 키를 만든다.
+    all_data["_group_key"] = build_group_keys(all_data, sheet)
+    # 베이지안 스무딩의 사전확률(prior): 이 플랫폼·이 달의 일별점수 전체 평균
+    global_mean_score = all_data["일별점수"].mean()
 
-    grouped = all_data.groupby(["상품명", "브랜드"]).agg(
+    grouped = all_data.groupby("_group_key").agg(
+        상품명=("상품명", lambda s: s.mode().iat[0]),  # 그룹 내 가장 흔한 표기를 대표명으로 사용
+        브랜드=("브랜드", lambda s: s.mode().iat[0]),
         평균순위=("순위", "mean"),
         등장횟수=("순위", "count"),
         평균가격_raw=("가격_숫자", "mean"),
         점수합=("일별점수", "sum"),
-    ).reset_index()
+    ).reset_index(drop=True)
 
     # 등장횟수 3회 미만인 상품은 월간 랭킹에서 제외 (1~2회 등장한 상품이 평균순위만으로 상위권에 오르는 것 방지)
     # 단, 필터 후 20개가 안 되면 기준을 2회→1회로 순차 완화해 최종 20개를 채운다
@@ -101,10 +185,12 @@ def aggregate_platform(daily_files: list, sheet: str, total_days: int, prev_df: 
         filtered = grouped[grouped["등장횟수"] >= min_appear]
     grouped = filtered
 
-    # 월간점수 = 평균점수×0.7 + 등장률×5점×0.3  (순위 70% + 꾸준함 30%)
-    grouped["평균점수"] = grouped["점수합"] / grouped["등장횟수"]
-    grouped["등장률"]   = grouped["등장횟수"] / total_days
-    grouped["월간점수"] = grouped["평균점수"] * 0.7 + (grouped["등장률"] * 5) * 0.3
+    # 월간점수 = 베이지안 평균: (점수합 + K×전체평균) / (등장횟수 + K)
+    # 등장횟수가 적을수록 전체 평균 쪽으로 점수가 당겨져, 2~3번 반짝 좋은 순위였던
+    # 상품이 표본 부족에도 불구하고 꾸준히 등장한 상품을 제치는 왜곡을 완화한다.
+    grouped["월간점수"] = (grouped["점수합"] + BAYESIAN_K * global_mean_score) / (
+        grouped["등장횟수"] + BAYESIAN_K
+    )
     grouped = grouped.sort_values("월간점수", ascending=False).head(20).reset_index(drop=True)
     grouped.insert(0, "순위(월평균)", range(1, len(grouped) + 1))
     grouped["평균순위"] = grouped["평균순위"].round(2)
@@ -119,13 +205,15 @@ def aggregate_platform(daily_files: list, sheet: str, total_days: int, prev_df: 
     prev_lookup = {}
     if prev_df is not None and not prev_df.empty:
         for _, r in prev_df.iterrows():
-            prev_lookup[(r["상품명"], r["브랜드"])] = (
+            key = (normalize_product_name(r["상품명"]), str(r["브랜드"]).strip())
+            prev_lookup[key] = (
                 r["순위(월평균)"], parse_saved_price(r.get("평균가격"))
             )
 
     전월순위_list, 순위변동_list, 전월가격_list, 가격변동_list = [], [], [], []
     for _, r in grouped.iterrows():
-        prev_rank, prev_price = prev_lookup.get((r["상품명"], r["브랜드"]), (None, None))
+        key = (normalize_product_name(r["상품명"]), str(r["브랜드"]).strip())
+        prev_rank, prev_price = prev_lookup.get(key, (None, None))
         전월순위_list.append(prev_rank)  # 없으면 None(NaN) — 숫자 컬럼에 "-" 문자열을 섞지 않기 위함
         순위변동_list.append(rank_change_label(prev_rank, r["순위(월평균)"]))
         전월가격_list.append(f"{int(prev_price):,}원" if prev_price else "-")
