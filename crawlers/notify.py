@@ -4,6 +4,10 @@ REST_API_KEY·REFRESH_TOKEN은 GitHub Secrets(KAKAO_REST_API_KEY,
 KAKAO_REFRESH_TOKEN)로 주입된다. 로컬 실행 시엔 동일한 이름의 환경변수를
 설정해야 동작하며, 둘 중 하나라도 없으면 알림만 건너뛰고 크롤링/저장은
 그대로 진행한다(크롤러_실패시.md 참고).
+
+카카오 디벨로퍼스 앱에서 "Client Secret 사용"이 켜져 있으면 토큰 갱신 시
+client_secret도 함께 보내야 하므로, KAKAO_CLIENT_SECRET 환경변수(선택)도
+지원한다 — 꺼져 있는 앱이면 설정하지 않아도 된다.
 """
 
 import json
@@ -19,18 +23,19 @@ ACTIONS_URL = "https://github.com/primexx98-sudo/online-mall-ranking/actions"
 def _get_access_token() -> str | None:
     rest_api_key = os.environ.get("KAKAO_REST_API_KEY")
     refresh_token = os.environ.get("KAKAO_REFRESH_TOKEN")
+    client_secret = os.environ.get("KAKAO_CLIENT_SECRET")
     if not rest_api_key or not refresh_token:
         return None
 
-    resp = requests.post(
-        TOKEN_URL,
-        data={
-            "grant_type": "refresh_token",
-            "client_id": rest_api_key,
-            "refresh_token": refresh_token,
-        },
-        timeout=10,
-    )
+    data = {
+        "grant_type": "refresh_token",
+        "client_id": rest_api_key,
+        "refresh_token": refresh_token,
+    }
+    if client_secret:
+        data["client_secret"] = client_secret
+
+    resp = requests.post(TOKEN_URL, data=data, timeout=10)
     if not resp.ok:
         raise RuntimeError(f"토큰 갱신 실패 {resp.status_code}: {resp.text}")
     return resp.json()["access_token"]
