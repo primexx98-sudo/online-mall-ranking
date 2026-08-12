@@ -16,6 +16,13 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
+      - name: Debug secret lengths (no values printed)
+        run: python -c "import os; [print(k, len(os.environ.get(k) or '')) for k in ['KAKAO_REST_API_KEY','KAKAO_REFRESH_TOKEN','KAKAO_CLIENT_SECRET']]"
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+
       - name: Send test notification
         run: python -c "from crawlers.notify import notify_kakao_failure; notify_kakao_failure(['테스트'], '2026-08-12')"
         env:
