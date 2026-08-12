@@ -1,0 +1,23 @@
+name: Test Kakao Notify
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-notify:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Send test notification
+        run: python -c "from crawlers.notify import notify_kakao_failure; notify_kakao_failure(['테스트'], '2026-08-12')"
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
