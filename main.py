@@ -13,6 +13,7 @@ import pandas as pd
 from crawlers.config import COLUMNS
 from crawlers.daiso import crawl_daiso
 from crawlers.kakao import crawl_kakao
+from crawlers.notify import notify_kakao_failure
 from crawlers.oliveyoung import crawl_oliveyoung
 
 DATA_DIR = Path(__file__).parent / "data" / "daily"
@@ -78,6 +79,7 @@ def main() -> None:
 
     if not platform_data:
         print("모든 플랫폼 수집 실패 - 저장 생략")
+        notify_kakao_failure(failed, date_str)
         sys.exit(1)
 
     out_path = save_daily_excel(date_str, platform_data)
@@ -85,6 +87,7 @@ def main() -> None:
 
     if failed:
         print(f"실패한 플랫폼: {', '.join(failed)}")
+        notify_kakao_failure(failed, date_str)
         sys.exit(1)
 
 

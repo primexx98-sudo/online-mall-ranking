@@ -23,6 +23,9 @@ jobs:
 
       - name: Run crawler
         run: python main.py
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
 
       - name: Commit results
         if: always()
