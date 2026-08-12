@@ -31,7 +31,8 @@ def _get_access_token() -> str | None:
         },
         timeout=10,
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        raise RuntimeError(f"토큰 갱신 실패 {resp.status_code}: {resp.text}")
     return resp.json()["access_token"]
 
 
@@ -62,7 +63,8 @@ def notify_kakao_failure(failed: list[str], date_str: str) -> None:
             data={"template_object": json.dumps(template_object, ensure_ascii=False)},
             timeout=10,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            raise RuntimeError(f"메시지 전송 실패 {resp.status_code}: {resp.text}")
         print("[알림 발송] 카카오톡 실패 알림 전송 완료")
     except Exception as e:
         print(f"[알림 실패] 카카오톡 전송 중 오류: {e}")
