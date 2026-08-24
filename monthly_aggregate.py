@@ -2,7 +2,7 @@ from pathlib import Path
 from datetime import date
 from collections import defaultdict
 from crawlers.classifier import classify, ALL_CATEGORIES, PLATFORMS as PLATFORM_NAMES
-from crawlers.excel_image import insert_card_sheet, insert_image_column
+from crawlers.excel_image import hide_sheet, insert_card_sheet, insert_image_column
 import re
 import pandas as pd
 
@@ -534,6 +534,9 @@ def write_sheet(writer, sheet_name: str, df: pd.DataFrame, with_images: bool = F
             continue  # 이미지 칸 폭은 insert_image_column이 이미 지정
         max_len = max(len(str(cell.value or "")) for cell in col)
         ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 60)
+
+    if with_images and not df.empty:
+        hide_sheet(ws)  # 카드형으로 같은 정보를 보여주므로 원본 표는 탭에서 숨김(데이터는 유지)
 
 
 def write_summary_sheet(writer, sheet_name: str, blocks: list):

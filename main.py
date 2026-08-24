@@ -12,7 +12,7 @@ import pandas as pd
 
 from crawlers.config import COLUMNS, PLATFORMS
 from crawlers.daiso import crawl_daiso
-from crawlers.excel_image import insert_card_sheet, insert_image_column
+from crawlers.excel_image import hide_sheet, insert_card_sheet, insert_image_column
 from crawlers.kakao import crawl_kakao
 from crawlers.notify import notify_kakao_failure
 from crawlers.oliveyoung import crawl_oliveyoung
@@ -74,8 +74,12 @@ def save_daily_excel(date_str: str, platform_data: dict[str, list[dict]]) -> Pat
             df.to_excel(writer, sheet_name=platform, index=False)
             insert_image_column(writer.sheets[platform], df["이미지URL"].tolist(), cache=image_cache)
             insert_card_sheet(writer.book, f"{platform}_카드형", build_card_blocks(platform, items), cache=image_cache)
+            hide_sheet(writer.sheets[platform])  # 카드형으로 같은 정보를 보여주므로 탭에서는 숨김(데이터는 유지)
         stats_df = build_category_stats(platform_data)
         stats_df.to_excel(writer, sheet_name="카테고리통계", index=False)
+
+        first_visible = next(s for s in writer.book.sheetnames if s.endswith("_카드형"))
+        writer.book.active = writer.book.sheetnames.index(first_visible)  # 원본 표가 숨겨져 있어 열자마자 그 탭이 뜨지 않도록
 
     return out_path
 

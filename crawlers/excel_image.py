@@ -93,6 +93,14 @@ def _add_scaled_image(ws, url: str, anchor: str, display_px: int, source_px: int
         pass
 
 
+def hide_sheet(ws) -> None:
+    """원본 표 시트를 탭에서 숨긴다(데이터는 그대로 남아 월별집계·health-trend가
+    변함없이 읽을 수 있음 — pd.read_excel/openpyxl 모두 숨김 시트도 그대로 읽힘).
+    사용자가 열었을 때 카드형·카테고리통계 탭만 보이게 하려고 2026-08-24 추가.
+    엑셀에서 시트 탭 우클릭 → 숨기기 취소로 언제든 다시 보이게 할 수 있다."""
+    ws.sheet_state = "hidden"
+
+
 def insert_image_column(ws, image_urls: list, data_start_row: int = 2, header: str = "이미지", cache: dict = None) -> None:
     """워크시트 맨 앞(A열)에 이미지 컬럼을 새로 끼워넣고 image_urls[i]를
     (data_start_row + i) 행에 임베드한다. 개별 URL 다운로드 실패는 그 칸만 비우고
