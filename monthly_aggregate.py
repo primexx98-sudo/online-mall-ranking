@@ -2,13 +2,14 @@ from pathlib import Path
 from datetime import date
 from collections import defaultdict
 from crawlers.classifier import classify, ALL_CATEGORIES, PLATFORMS as PLATFORM_NAMES
+from crawlers.excel_image import insert_card_sheet, insert_image_column
 import re
 import pandas as pd
 
 
 PLATFORMS   = ["카카오선물하기", "다이소몰", "올리브영"]
 COLUMNS_OUT = [
-    "순위(월평균)", "카테고리", "상품명", "브랜드",
+    "순위(월평균)", "카테고리", "상품명", "브랜드", "이미지URL", "상품URL",
     "평균가격", "전월가격", "가격변동",
     "평균순위", "전월순위", "순위변동",
     "등장횟수",
@@ -170,6 +171,13 @@ def aggregate_platform(daily_files: list, sheet: str, total_days: int, prev_df: 
     grouped = all_data.groupby("_group_key").agg(
         상품명=("상품명", lambda s: s.mode().iat[0]),  # 그룹 내 가장 흔한 표기를 대표명으로 사용
         브랜드=("브랜드", lambda s: s.mode().iat[0]),
+        # 이미지URL은 상품명처럼 매일 문구가 흔들리지 않고 상품코드 기준이라 값이 있는
+        # 것 중 아무거나(첫 값) 쓰면 충분 — mode()는 URL 쿼리스트링 미세 차이로 전부
+        # 다른 값 취급돼 그룹 대표를 못 뽑는 경우가 있어 대신 사용.
+        이미지URL=("이미지URL", lambda s: next((x for x in s if isinstance(x, str) and x.strip()), "")),
+        # 상품URL도 이미지URL과 같은 이유로 mode() 대신 "값 있는 첫 항목" 사용 — 카드형
+        # 시트의 하이퍼링크(2026-08-24 추가)에 씀.
+        상품URL=("상품URL", lambda s: next((x for x in s if isinstance(x, str) and x.strip()), "")),
         평균순위=("순위", "mean"),
         등장횟수=("순위", "count"),
         평균가격_raw=("가격_숫자", "mean"),
@@ -497,10 +505,33 @@ def build_monthly_summary(platform_dfs: dict, category_stats_df: pd.DataFrame,
     ]
 
 
-def write_sheet(writer, sheet_name: str, df: pd.DataFrame):
+def _to_card_items(df: pd.DataFrame) -> list:
+    """월별취합 플랫폼 df(순위(월평균)/평균가격 등)를 카드형 시트가 기대하는
+    범용 키(순위/가격 등, insert_card_sheet 참고)로 변환."""
+    return [
+        {
+            "순위": r["순위(월평균)"],
+            "카테고리": r["카테고리"],
+            "상품명": r["상품명"],
+            "브랜드": r["브랜드"],
+            "가격": r["평균가격"],
+            "상품URL": r.get("상품URL", ""),
+            "이미지URL": r.get("이미지URL", ""),
+        }
+        for _, r in df.iterrows()
+    ]
+
+
+def write_sheet(writer, sheet_name: str, df: pd.DataFrame, with_images: bool = False, image_cache: dict = None):
     df.to_excel(writer, sheet_name=sheet_name, index=False)
     ws = writer.sheets[sheet_name]
+    if with_images and not df.empty:
+        insert_image_column(ws, df["이미지URL"].tolist(), cache=image_cache)  # 폭 설정 전에 삽입해야 열 문자가 밀린 뒤 기준으로 계산됨
+        insert_card_sheet(writer.book, f"{sheet_name}_카드형", [(sheet_name, _to_card_items(df))],
+                           price_label="평균가격", cache=image_cache)
     for col in ws.columns:
+        if with_images and col[0].column_letter == "A":
+            continue  # 이미지 칸 폭은 insert_image_column이 이미 지정
         max_len = max(len(str(cell.value or "")) for cell in col)
         ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 60)
 
@@ -572,10 +603,13 @@ def main():
     brand_df = build_monthly_brand_stats(platform_dfs, prev_sheets.get("브랜드통계"))
     summary_blocks = build_monthly_summary(platform_dfs, stats_df, brand_df, total_days)
 
+    image_cache: dict = {}  # 표 시트·카드형 시트 양쪽에 같은 이미지가 들어가므로 원본
+    # 다운로드를 1회로 줄이는 URL→바이트 캐시 (crawlers/excel_image.py 참고)
+
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         write_summary_sheet(writer, "월별요약", summary_blocks)
         for platform in PLATFORMS:
-            write_sheet(writer, platform, platform_dfs[platform])
+            write_sheet(writer, platform, platform_dfs[platform], with_images=True, image_cache=image_cache)
         write_sheet(writer, "카테고리통계", stats_df)
         write_sheet(writer, "브랜드통계", brand_df)
 
