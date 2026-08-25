@@ -2,5 +2,6 @@ __pycache__/
 *.pyc
 .env
 data/daily/TEST/
+data/monthly/*_TEST.xlsx
 *.xlsx.tmp
 ~$*.xlsx

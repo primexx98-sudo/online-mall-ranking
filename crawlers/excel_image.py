@@ -115,10 +115,8 @@ def insert_image_column(ws, image_urls: list, data_start_row: int = 2, header: s
         _add_scaled_image(ws, url, f"A{row}", THUMB_PX, THUMB_SOURCE_PX, cache=cache)
 
 
-_CARD_FIELD_LABELS = ["썸네일", "카테고리", "브랜드", "상품명", "판매가", "링크"]
-
-
-def insert_card_sheet(wb, sheet_name: str, blocks: list, price_label: str = "판매가", cache: dict = None) -> None:
+def insert_card_sheet(wb, sheet_name: str, blocks: list, price_label: str = "판매가", cache: dict = None,
+                       extra_fields: list = None) -> None:
     """순위를 가로로 펼쳐 열마다 상품 하나가 되는 카드형 시트를 새로 만든다.
     blocks는 [(블록 라벨, items), ...] — 서브카테고리처럼 순위가 1위부터 여러 번 반복되는
     플랫폼(카카오선물하기)은 블록을 나눠 세로로 쌓아 1위~N위 헤더를 블록마다 따로 갖는다
@@ -126,8 +124,11 @@ def insert_card_sheet(wb, sheet_name: str, blocks: list, price_label: str = "판
     items는 카테고리/순위/상품명/브랜드/가격/상품URL/이미지URL 키를 가진 dict 리스트를 받는다
     (일별은 main.py의 platform_data 값 그대로, 월별취합은 순위(월평균)→순위·평균가격→가격으로
     맞춰 변환해서 넘김). price_label은 "가격" 행에 붙는 라벨만 바꾼다(월별취합은 "평균가격").
-    기존 표 시트는 건드리지 않는다."""
+    extra_fields=[(라벨, item키), ...]를 넘기면 상품명과 가격 사이에 그만큼 행이 추가된다
+    (예: [("평균순위","평균순위"), ("등장횟수","등장횟수")]) — 일별 카드형은 이런 값이
+    없어 기본 None, 월별취합 카드형에서만 넘긴다. 기존 표 시트는 건드리지 않는다."""
     ws = wb.create_sheet(title=sheet_name)
+    extra_fields = extra_fields or []
 
     max_cols = max((len(items) for _, items in blocks), default=0)
     ws.column_dimensions["A"].width = CARD_LABEL_COL_WIDTH
@@ -137,19 +138,23 @@ def insert_card_sheet(wb, sheet_name: str, blocks: list, price_label: str = "판
 
     row = 1
     for block_label, items in blocks:
-        row = _write_card_block(ws, row, block_label, items, price_label, cache=cache)
+        row = _write_card_block(ws, row, block_label, items, price_label, cache=cache, extra_fields=extra_fields)
 
     ws.freeze_panes = "C2"
 
 
-def _write_card_block(ws, header_row: int, block_label: str, items: list, price_label: str, cache: dict = None) -> int:
-    """header_row부터 카드 블록 하나(헤더+썸네일+필드 6줄)를 그리고, 다음 블록이 시작할
+def _write_card_block(ws, header_row: int, block_label: str, items: list, price_label: str, cache: dict = None,
+                       extra_fields: list = None) -> int:
+    """header_row부터 카드 블록 하나(헤더+썸네일+필드 6~N줄)를 그리고, 다음 블록이 시작할
     행 번호(빈 줄 1개 포함)를 반환한다."""
     bold = Font(bold=True)
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    extra_fields = extra_fields or []
 
-    field_labels = list(_CARD_FIELD_LABELS)
-    field_labels[4] = price_label
+    field_labels = ["썸네일", "카테고리", "브랜드", "상품명"]
+    field_labels += [label for label, _ in extra_fields]
+    field_labels.append(price_label)
+    field_labels.append("링크")
 
     ws.cell(row=header_row, column=1, value="플랫폼").font = bold
     ws.cell(row=header_row, column=2, value="순위").font = bold
@@ -159,8 +164,11 @@ def _write_card_block(ws, header_row: int, block_label: str, items: list, price_
     for r, label in enumerate(field_labels, start=header_row + 1):
         ws.cell(row=r, column=2, value=label).font = bold
 
-    last_row = header_row + len(_CARD_FIELD_LABELS)
-    thumb_row, name_row = header_row + 1, header_row + 4
+    last_row = header_row + len(field_labels)
+    thumb_row, cat_row, brand_row, name_row = header_row + 1, header_row + 2, header_row + 3, header_row + 4
+    extra_rows = [name_row + 1 + i for i in range(len(extra_fields))]
+    price_row = name_row + 1 + len(extra_fields)
+    link_row = price_row + 1
 
     ws.merge_cells(start_row=header_row + 1, start_column=1, end_row=last_row, end_column=1)
     plat_cell = ws.cell(row=header_row + 1, column=1, value=block_label)
@@ -174,13 +182,15 @@ def _write_card_block(ws, header_row: int, block_label: str, items: list, price_
         col = 3 + i
         col_letter = get_column_letter(col)
 
-        ws.cell(row=header_row + 2, column=col, value=item.get("카테고리", "")).alignment = center
-        ws.cell(row=header_row + 3, column=col, value=item.get("브랜드", "")).alignment = center
+        ws.cell(row=cat_row, column=col, value=item.get("카테고리", "")).alignment = center
+        ws.cell(row=brand_row, column=col, value=item.get("브랜드", "")).alignment = center
         name_cell = ws.cell(row=name_row, column=col, value=item.get("상품명", ""))
         name_cell.alignment = center
-        ws.cell(row=header_row + 5, column=col, value=item.get("가격", "")).alignment = center
+        for extra_row, (_, item_key) in zip(extra_rows, extra_fields):
+            ws.cell(row=extra_row, column=col, value=item.get(item_key, "")).alignment = center
+        ws.cell(row=price_row, column=col, value=item.get("가격", "")).alignment = center
 
-        link_cell = ws.cell(row=header_row + 6, column=col)
+        link_cell = ws.cell(row=link_row, column=col)
         url = item.get("상품URL", "")
         if url:
             link_cell.value = "바로가기"

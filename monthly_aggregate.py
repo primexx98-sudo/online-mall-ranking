@@ -348,6 +348,27 @@ def build_key_metrics(platform_dfs: dict, brand_stats_df: pd.DataFrame,
     return pd.DataFrame(rows)
 
 
+def build_bayesian_note(platform_dfs: dict, total_days: int, appear_ratio: float = 0.3, rank_threshold: float = 3.0) -> pd.DataFrame:
+    """"평균순위는 1위인데 왜 최종 순위(월평균)는 2위야?" 같은 질문의 근거를 표로 짚어준다.
+    최종 순위는 단순 평균순위가 아니라 등장횟수를 반영한 베이지안 평균(월간점수)으로
+    매기기 때문에, 등장은 며칠 안 됐지만(전체 수집일의 appear_ratio 미만) 그 며칠 동안
+    평균순위가 최상위권(rank_threshold 이하)이었던 "반짝 상위권" 상품은 표본 부족으로
+    점수가 전체 평균 쪽으로 당겨져 최종 순위가 평균순위보다 낮게 나올 수 있다."""
+    appear_cutoff = total_days * appear_ratio
+    rows = []
+    for platform, df in platform_dfs.items():
+        if df.empty:
+            continue
+        flagged = df[(df["평균순위"] <= rank_threshold) & (df["등장횟수"] <= appear_cutoff)]
+        for _, r in flagged.iterrows():
+            rows.append({
+                "플랫폼": platform, "상품명": r["상품명"], "브랜드": r["브랜드"],
+                "평균순위": r["평균순위"], "등장횟수": f"{int(r['등장횟수'])}/{total_days}일",
+                "최종순위(월평균)": r["순위(월평균)"],
+            })
+    return pd.DataFrame(rows, columns=["플랫폼", "상품명", "브랜드", "평균순위", "등장횟수", "최종순위(월평균)"])
+
+
 def build_platform_top1(platform_dfs: dict) -> pd.DataFrame:
     """플랫폼별 이번 달 평균순위 1위 상품."""
     rows = []
@@ -491,9 +512,15 @@ def build_monthly_summary(platform_dfs: dict, category_stats_df: pd.DataFrame,
 
     new_df = pd.DataFrame(new_rows, columns=["플랫폼", "상품명", "브랜드", "이번달순위"])
     insight_df = build_growth_insights(rising, cat_up, new_df, top_n)
+    bayesian_note_df = build_bayesian_note(platform_dfs, total_days)
 
     return [
         ("이번 달 핵심 지표", build_key_metrics(platform_dfs, brand_stats_df, category_stats_df, total_days)),
+        ("순위 산정 기준 안내",
+         "각 시트의 '순위(월평균)'은 단순 평균순위가 아니라 등장횟수를 반영한 베이지안 평균(월간점수)으로 매깁니다. "
+         "며칠만 등장했지만 그 며칠은 최상위권이었던 상품은 표본이 적어 점수가 전체 평균 쪽으로 조정되므로, "
+         "'평균순위'는 1위인데 최종 '순위(월평균)'는 2위 이하로 나올 수 있습니다(꾸준히 등장한 상품에 가중치를 주기 위한 설계)."),
+        (f"반짝 상위권 상품 ({len(bayesian_note_df)}개, 평균순위 최상위권인데 등장횟수 적어 최종 순위가 밀린 상품)", bayesian_note_df),
         ("플랫폼별 1위 상품", build_platform_top1(platform_dfs)),
         ("성장 + 고순위 카테고리 추천", build_category_recommendations(platform_dfs, category_stats_df, top_n)),
         (f"전월 대비 급상승 TOP{top_n}", rising),
@@ -514,6 +541,8 @@ def _to_card_items(df: pd.DataFrame) -> list:
             "카테고리": r["카테고리"],
             "상품명": r["상품명"],
             "브랜드": r["브랜드"],
+            "평균순위": r["평균순위"],
+            "등장횟수": r["등장횟수"],
             "가격": r["평균가격"],
             "상품URL": r.get("상품URL", ""),
             "이미지URL": r.get("이미지URL", ""),
@@ -528,7 +557,8 @@ def write_sheet(writer, sheet_name: str, df: pd.DataFrame, with_images: bool = F
     if with_images and not df.empty:
         insert_image_column(ws, df["이미지URL"].tolist(), cache=image_cache)  # 폭 설정 전에 삽입해야 열 문자가 밀린 뒤 기준으로 계산됨
         insert_card_sheet(writer.book, f"{sheet_name}_카드형", [(sheet_name, _to_card_items(df))],
-                           price_label="평균가격", cache=image_cache)
+                           price_label="평균가격", cache=image_cache,
+                           extra_fields=[("평균순위", "평균순위"), ("등장횟수", "등장횟수")])
     for col in ws.columns:
         if with_images and col[0].column_letter == "A":
             continue  # 이미지 칸 폭은 insert_image_column이 이미 지정
