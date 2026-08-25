@@ -15,10 +15,6 @@ COLUMNS_OUT = [
     "등장횟수",
 ]
 
-# 베이지안 스무딩 가상표본 수. 등장횟수가 이 값보다 훨씬 적은 상품은 점수가 전체 평균
-# 쪽으로 강하게 당겨지고, 이 값보다 훨씬 많으면 원래 평균점수에 거의 수렴한다.
-BAYESIAN_K = 5
-
 # 상품URL에서 플랫폼별 고유 상품코드를 뽑아내는 패턴. 상세페이지 제목은 프로모션 문구 때문에
 # 거의 매일 바뀌지만(예: "7입"→"8입(7+1)", "독일 명품 비타민" 접두사 추가/삭제 등) URL 속
 # 상품코드는 실제로 다른 상품이 등록되지 않는 한 고정이라 동일 상품 판별에 훨씬 안전하다.
@@ -165,8 +161,6 @@ def aggregate_platform(daily_files: list, sheet: str, total_days: int, prev_df: 
     # 상품명 텍스트가 날짜마다 흔들려도(프로모션 문구 변경 등) 같은 상품으로 묶이도록
     # URL 상품코드(우선) 또는 정규화된 이름(대체)으로 그룹 키를 만든다.
     all_data["_group_key"] = build_group_keys(all_data, sheet)
-    # 베이지안 스무딩의 사전확률(prior): 이 플랫폼·이 달의 일별점수 전체 평균
-    global_mean_score = all_data["일별점수"].mean()
 
     grouped = all_data.groupby("_group_key").agg(
         상품명=("상품명", lambda s: s.mode().iat[0]),  # 그룹 내 가장 흔한 표기를 대표명으로 사용
@@ -193,12 +187,13 @@ def aggregate_platform(daily_files: list, sheet: str, total_days: int, prev_df: 
         filtered = grouped[grouped["등장횟수"] >= min_appear]
     grouped = filtered
 
-    # 월간점수 = 베이지안 평균: (점수합 + K×전체평균) / (등장횟수 + K)
-    # 등장횟수가 적을수록 전체 평균 쪽으로 점수가 당겨져, 2~3번 반짝 좋은 순위였던
-    # 상품이 표본 부족에도 불구하고 꾸준히 등장한 상품을 제치는 왜곡을 완화한다.
-    grouped["월간점수"] = (grouped["점수합"] + BAYESIAN_K * global_mean_score) / (
-        grouped["등장횟수"] + BAYESIAN_K
-    )
+    # 월간점수 = 점수합 ÷ 전체 수집일수(등장횟수가 아님). 등장하지 못한 날은 0점(11위 밖과
+    # 동일 취급)으로 셈에 포함되는 효과라, 며칠만 반짝 상위권이었던 상품은 등장 못 한 날들이
+    # 점수를 자연스럽게 깎아내려 매일 꾸준히 상위권을 지킨 상품을 앞지르지 못한다.
+    # (예: 평균순위 4.2·5일 등장 상품이 평균순위 5.33·15일 등장 상품보다 원래 평균은 좋아도,
+    # 최종적으로는 15일 상품이 이김 — 등장횟수를 사전확률로 "당기기"만 하던 이전 베이지안
+    # 평균 방식은 K값을 아무리 조정해도 이 역전이 불가능했음.)
+    grouped["월간점수"] = grouped["점수합"] / total_days
     grouped = grouped.sort_values("월간점수", ascending=False).head(20).reset_index(drop=True)
     grouped.insert(0, "순위(월평균)", range(1, len(grouped) + 1))
     grouped["평균순위"] = grouped["평균순위"].round(2)
@@ -348,12 +343,12 @@ def build_key_metrics(platform_dfs: dict, brand_stats_df: pd.DataFrame,
     return pd.DataFrame(rows)
 
 
-def build_bayesian_note(platform_dfs: dict, total_days: int, appear_ratio: float = 0.3, rank_threshold: float = 3.0) -> pd.DataFrame:
+def build_exposure_note(platform_dfs: dict, total_days: int, appear_ratio: float = 0.3, rank_threshold: float = 3.0) -> pd.DataFrame:
     """"평균순위는 1위인데 왜 최종 순위(월평균)는 2위야?" 같은 질문의 근거를 표로 짚어준다.
-    최종 순위는 단순 평균순위가 아니라 등장횟수를 반영한 베이지안 평균(월간점수)으로
-    매기기 때문에, 등장은 며칠 안 됐지만(전체 수집일의 appear_ratio 미만) 그 며칠 동안
-    평균순위가 최상위권(rank_threshold 이하)이었던 "반짝 상위권" 상품은 표본 부족으로
-    점수가 전체 평균 쪽으로 당겨져 최종 순위가 평균순위보다 낮게 나올 수 있다."""
+    최종 순위는 단순 평균순위가 아니라 점수합÷전체 수집일수(8절 참고)로 매기기 때문에,
+    등장은 며칠 안 됐지만(전체 수집일의 appear_ratio 미만) 그 며칠 동안 평균순위가
+    최상위권(rank_threshold 이하)이었던 "반짝 상위권" 상품은 등장 못 한 날들이 0점으로
+    셈해져 최종 순위가 평균순위보다 낮게 나올 수 있다."""
     appear_cutoff = total_days * appear_ratio
     rows = []
     for platform, df in platform_dfs.items():
@@ -512,15 +507,16 @@ def build_monthly_summary(platform_dfs: dict, category_stats_df: pd.DataFrame,
 
     new_df = pd.DataFrame(new_rows, columns=["플랫폼", "상품명", "브랜드", "이번달순위"])
     insight_df = build_growth_insights(rising, cat_up, new_df, top_n)
-    bayesian_note_df = build_bayesian_note(platform_dfs, total_days)
+    exposure_note_df = build_exposure_note(platform_dfs, total_days)
 
     return [
         ("이번 달 핵심 지표", build_key_metrics(platform_dfs, brand_stats_df, category_stats_df, total_days)),
         ("순위 산정 기준 안내",
-         "각 시트의 '순위(월평균)'은 단순 평균순위가 아니라 등장횟수를 반영한 베이지안 평균(월간점수)으로 매깁니다. "
-         "며칠만 등장했지만 그 며칠은 최상위권이었던 상품은 표본이 적어 점수가 전체 평균 쪽으로 조정되므로, "
-         "'평균순위'는 1위인데 최종 '순위(월평균)'는 2위 이하로 나올 수 있습니다(꾸준히 등장한 상품에 가중치를 주기 위한 설계)."),
-        (f"반짝 상위권 상품 ({len(bayesian_note_df)}개, 평균순위 최상위권인데 등장횟수 적어 최종 순위가 밀린 상품)", bayesian_note_df),
+         "각 시트의 '순위(월평균)'은 단순 평균순위가 아니라 '점수합÷전체 수집일수'로 매깁니다. "
+         "안 나온 날은 0점으로 셈해지므로, 며칠만 등장했지만 그 며칠은 최상위권이었던 상품은 안 나온 날들이 "
+         "점수를 깎아내려 '평균순위'는 1위인데 최종 '순위(월평균)'는 2위 이하로 나올 수 있습니다 "
+         "(며칠 반짝 상위권보다 꾸준히 등장한 상품이 유리하도록 한 설계)."),
+        (f"반짝 상위권 상품 ({len(exposure_note_df)}개, 평균순위 최상위권인데 등장횟수 적어 최종 순위가 밀린 상품)", exposure_note_df),
         ("플랫폼별 1위 상품", build_platform_top1(platform_dfs)),
         ("성장 + 고순위 카테고리 추천", build_category_recommendations(platform_dfs, category_stats_df, top_n)),
         (f"전월 대비 급상승 TOP{top_n}", rising),
