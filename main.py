@@ -20,6 +20,29 @@ from crawlers.oliveyoung import crawl_oliveyoung
 DATA_DIR = Path(__file__).parent / "data" / "daily"
 
 
+def load_existing_platform_data(date_str: str, platform_names: list[str]) -> dict[str, list[dict]]:
+    """같은 날짜로 하루 중 이미 성공 저장된 파일이 있으면(중복 스케줄 재실행 등)
+    플랫폼별 기존 데이터를 읽어온다 — 재실행에서 특정 플랫폼만 실패해도
+    직전 성공분을 덮어쓰지 않고 유지하기 위한 fallback."""
+    year_month = date_str[:7] if date_str != "TEST" else "TEST"
+    path = DATA_DIR / year_month / f"{date_str}.xlsx"
+    if not path.exists():
+        return {}
+
+    existing: dict[str, list[dict]] = {}
+    try:
+        sheets = pd.read_excel(path, sheet_name=None)
+    except Exception:
+        return {}
+
+    for name in platform_names:
+        df = sheets.get(name)
+        if df is None or df.empty:
+            continue
+        existing[name] = df[COLUMNS].to_dict("records")
+    return existing
+
+
 def build_category_stats(platform_data: dict[str, list[dict]]) -> pd.DataFrame:
     rows = []
     all_categories = set()
@@ -87,6 +110,9 @@ def save_daily_excel(date_str: str, platform_data: dict[str, list[dict]]) -> Pat
 def main() -> None:
     date_str = sys.argv[1] if len(sys.argv) > 1 else datetime.now().strftime("%Y-%m-%d")
 
+    platform_names = ["카카오선물하기", "다이소몰", "올리브영"]
+    existing_data = load_existing_platform_data(date_str, platform_names)
+
     platform_data: dict[str, list[dict]] = {}
     failed: list[str] = []
 
@@ -104,6 +130,9 @@ def main() -> None:
         except Exception as e:
             print(f"[FAIL] {name}: {e}")
             failed.append(name)
+            if name in existing_data:
+                platform_data[name] = existing_data[name]
+                print(f"[FALLBACK] {name}: 기존 성공분 {len(existing_data[name])}건 유지")
 
     if not platform_data:
         print("모든 플랫폼 수집 실패 - 저장 생략")
@@ -115,7 +144,14 @@ def main() -> None:
 
     if failed:
         print(f"실패한 플랫폼: {', '.join(failed)}")
-        notify_kakao_failure(failed, date_str)
+        # fallback으로 기존 성공분을 재사용한 플랫폼은 데이터 유실이 없으므로 알림 제외.
+        # 그날 처음부터 실패했든, 지연 재실행까지 또 실패했든 fallback이 없으면(=그 플랫폼
+        # 데이터가 실제로 비어버림) 알림 대상.
+        truly_failed = [name for name in failed if name not in existing_data]
+        if truly_failed:
+            notify_kakao_failure(truly_failed, date_str)
+        else:
+            print("[알림 생략] 실패한 플랫폼 모두 기존 성공분으로 대체되어 데이터 유실 없음")
         sys.exit(1)
 
 
