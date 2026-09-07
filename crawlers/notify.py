@@ -70,6 +70,12 @@ def notify_kakao_failure(failed: list[str], date_str: str) -> None:
         )
         if not resp.ok:
             raise RuntimeError(f"메시지 전송 실패 {resp.status_code}: {resp.text}")
-        print("[알림 발송] 카카오톡 실패 알림 전송 완료")
+        # HTTP 200이어도 카카오 응답 바디의 result_code가 0이 아니면 실제로는
+        # 미전송인 경우가 있어(2026-09-07 사용자가 알림 미수신 보고 후 확인) 반드시
+        # 함께 확인해야 함.
+        result = resp.json()
+        if result.get("result_code") != 0:
+            raise RuntimeError(f"메시지 전송 실패(result_code={result.get('result_code')}): {resp.text}")
+        print(f"[알림 발송] 카카오톡 실패 알림 전송 완료: {resp.text}")
     except Exception as e:
         print(f"[알림 실패] 카카오톡 전송 중 오류: {e}")
