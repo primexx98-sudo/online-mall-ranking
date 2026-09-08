@@ -67,6 +67,23 @@ def build_category_stats(platform_data: dict[str, list[dict]]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+CARD_REVIEW_FIELDS = [
+    ("평점", "리뷰평점"), ("리뷰수", "리뷰건수"),
+    ("긍정리뷰", "_긍정리뷰"), ("부정리뷰", "_부정리뷰"),
+]
+
+
+def _prepare_review_card_fields(items: list[dict]) -> None:
+    """카드형 시트는 긍정1~3/부정1~3을 각각 한 줄씩 보여주면 너무 길어지므로,
+    줄바꿈으로 이어붙인 문자열 하나(_긍정리뷰/_부정리뷰)로 압축해 카드 한 칸에 담는다.
+    COLUMNS에 없는 내부용 키라 표 시트(엑셀 원본 데이터)에는 영향 없음."""
+    for item in items:
+        positives = [item.get(f"긍정{i}") for i in (1, 2, 3)]
+        negatives = [item.get(f"부정{i}") for i in (1, 2, 3)]
+        item["_긍정리뷰"] = "\n".join(p for p in positives if p)
+        item["_부정리뷰"] = "\n".join(n for n in negatives if n)
+
+
 def build_card_blocks(platform: str, items: list[dict]) -> list[tuple[str, list[dict]]]:
     """카카오선물하기는 서브카테고리 2개(각 top_n)가 이어붙어 있어 순위가 1위부터 두 번
     반복된다 — 카드형 시트를 한 줄로 펼치면 가로 스크롤이 너무 길어지므로(2026-08-24
@@ -99,7 +116,9 @@ def save_daily_excel(date_str: str, platform_data: dict[str, list[dict]]) -> Pat
             df = pd.DataFrame(items, columns=COLUMNS)
             df.to_excel(writer, sheet_name=platform, index=False)
             insert_image_column(writer.sheets[platform], df["이미지URL"].tolist(), cache=image_cache)
-            insert_card_sheet(writer.book, f"{platform}_카드형", build_card_blocks(platform, items), cache=image_cache)
+            _prepare_review_card_fields(items)
+            insert_card_sheet(writer.book, f"{platform}_카드형", build_card_blocks(platform, items),
+                               cache=image_cache, extra_fields=CARD_REVIEW_FIELDS)
             hide_sheet(writer.sheets[platform])  # 카드형으로 같은 정보를 보여주므로 탭에서는 숨김(데이터는 유지)
         stats_df = build_category_stats(platform_data)
         stats_df.to_excel(writer, sheet_name="카테고리통계", index=False)

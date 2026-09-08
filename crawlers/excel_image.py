@@ -32,8 +32,9 @@ CARD_IMG_PX = 130
 CARD_IMG_SOURCE_PX = 280
 CARD_ROW_HEIGHT_PT = 100
 CARD_NAME_ROW_HEIGHT_PT = 46
-CARD_COL_WIDTH = 17
+CARD_COL_WIDTH = 22  # 긍정리뷰/부정리뷰 문장이 들어가면서 17→22로 확장(2026-09-08)
 CARD_LABEL_COL_WIDTH = 10
+EXTRA_ROW_LINE_HEIGHT_PT = 30  # 긍정리뷰/부정리뷰처럼 줄바꿈이 여러 줄인 extra_fields 행의 줄당 높이(카테고리별 문장이 열 너비 안에서 다시 줄바꿈되는 것까지 감안한 여유값)
 
 # 원본 상품 이미지(수백 KB~수 MB급)를 셀 표시 크기로만 리사이즈하지 않고 그대로 임베드하면
 # 일별 xlsx 하나가 수십 MB로 불어난다(실측: 48px 표시로 40장 임베드 시 55MB). 화면엔 작게만
@@ -178,6 +179,7 @@ def _write_card_block(ws, header_row: int, block_label: str, items: list, price_
     ws.row_dimensions[thumb_row].height = CARD_ROW_HEIGHT_PT
     ws.row_dimensions[name_row].height = CARD_NAME_ROW_HEIGHT_PT
 
+    extra_row_max_lines = {r: 1 for r in extra_rows}
     for i, item in enumerate(items):
         col = 3 + i
         col_letter = get_column_letter(col)
@@ -187,7 +189,12 @@ def _write_card_block(ws, header_row: int, block_label: str, items: list, price_
         name_cell = ws.cell(row=name_row, column=col, value=item.get("상품명", ""))
         name_cell.alignment = center
         for extra_row, (_, item_key) in zip(extra_rows, extra_fields):
-            ws.cell(row=extra_row, column=col, value=item.get(item_key, "")).alignment = center
+            value = item.get(item_key, "")
+            ws.cell(row=extra_row, column=col, value=value).alignment = center
+            # 긍정리뷰/부정리뷰처럼 줄바꿈이 섞인 값은 줄 수만큼 행 높이를 늘려야
+            # wrap_text로 잘리지 않고 다 보인다(openpyxl은 자동 줄맞춤이 안 됨).
+            if isinstance(value, str) and "\n" in value:
+                extra_row_max_lines[extra_row] = max(extra_row_max_lines[extra_row], value.count("\n") + 1)
         ws.cell(row=price_row, column=col, value=item.get("가격", "")).alignment = center
 
         link_cell = ws.cell(row=link_row, column=col)
@@ -199,5 +206,9 @@ def _write_card_block(ws, header_row: int, block_label: str, items: list, price_
         link_cell.alignment = center
 
         _add_scaled_image(ws, item.get("이미지URL", ""), f"{col_letter}{thumb_row}", CARD_IMG_PX, CARD_IMG_SOURCE_PX, cache=cache)
+
+    for extra_row, max_lines in extra_row_max_lines.items():
+        if max_lines > 1:
+            ws.row_dimensions[extra_row].height = EXTRA_ROW_LINE_HEIGHT_PT * max_lines
 
     return last_row + 2  # 다음 블록 전 빈 줄 1개
