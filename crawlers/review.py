@@ -96,8 +96,15 @@ def fetch_daiso_review_material(product_url: str) -> dict:
         {"rating": it.get("stscVal"), "text": (it.get("revwCn") or "").replace("&nbsp;", " ").strip()}
         for it in items if it.get("revwCn")
     ]
+    # 다이소 API는 revwAvg를 숫자가 아니라 문자열("4.8")로 내려줘서, 그대로 저장하면
+    # 소비 측(health-trend 등)에서 f"{rating:.1f}" 같은 숫자 포맷팅이 깨진다.
+    raw_avg = pd_revw.get("revwAvg")
+    try:
+        avg_score = float(raw_avg) if raw_avg not in (None, "") else None
+    except (TypeError, ValueError):
+        avg_score = None
     return {
-        "리뷰평점": pd_revw.get("revwAvg"),
+        "리뷰평점": avg_score,
         "리뷰건수": pd_revw.get("revwCnt"),
         "긍정비율": pd_revw.get("revwPositive"),
         "리뷰샘플": reviews,
