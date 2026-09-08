@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from crawlers.ai_review_summary import attach_review_summaries
 from crawlers.config import COLUMNS, PLATFORMS
 from crawlers.daiso import crawl_daiso
 from crawlers.excel_image import hide_sheet, insert_card_sheet, insert_image_column
@@ -39,7 +40,9 @@ def load_existing_platform_data(date_str: str, platform_names: list[str]) -> dic
         df = sheets.get(name)
         if df is None or df.empty:
             continue
-        existing[name] = df[COLUMNS].to_dict("records")
+        # reindex: 리뷰요약 컬럼 도입 이전에 저장된 옛 파일은 새 컬럼이 없어 KeyError가
+        # 나므로, 없는 컬럼은 NaN으로 채워 항상 현재 COLUMNS 스키마로 맞춘다.
+        existing[name] = df.reindex(columns=COLUMNS).to_dict("records")
     return existing
 
 
@@ -138,6 +141,13 @@ def main() -> None:
         print("모든 플랫폼 수집 실패 - 저장 생략")
         notify_kakao_failure(failed, date_str)
         sys.exit(1)
+
+    # AI 긍정/부정 요약은 오늘 새로 수집된 상품에만 실행한다 — fallback(기존 성공분)
+    # 상품은 이미 그 날 요약이 있거나(또는 옛 파일이라 애초에 없거나) 변경된 게 없으므로
+    # 다시 돌리면 Gemini 하루 호출 한도만 낭비한다.
+    fresh_platform_data = {name: items for name, items in platform_data.items() if name not in failed}
+    if fresh_platform_data:
+        attach_review_summaries(fresh_platform_data)
 
     out_path = save_daily_excel(date_str, platform_data)
     print(f"저장 완료: {out_path}")

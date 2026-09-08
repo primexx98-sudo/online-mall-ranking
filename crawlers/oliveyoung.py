@@ -13,6 +13,7 @@ from selenium.webdriver.common.by import By
 from crawlers.base import new_driver
 from crawlers.classifier import classify
 from crawlers.config import PLATFORMS
+from crawlers.review import fetch_oliveyoung_review_material
 
 ITEM_SELECTOR = "ul.cate_prd_list > li"
 
@@ -22,7 +23,9 @@ def crawl_oliveyoung() -> list[dict]:
     top_n = config["top_n"]
     url = f"{config['url']}&pageIdx=1&rowsPerPage={top_n}"
 
-    with new_driver() as driver:
+    # network_logging=True: 리뷰 API(JSON) 응답을 CDP 성능 로그로 가로채야 하는
+    # crawlers/review.py의 fetch_oliveyoung_review_material()이 이 세션을 그대로 재사용한다.
+    with new_driver(network_logging=True) as driver:
         driver.get(url)
         time.sleep(8)
 
@@ -58,19 +61,29 @@ def crawl_oliveyoung() -> list[dict]:
                 }
             )
 
-    results = []
-    for rank, item in enumerate(items, start=1):
-        if not item["name"]:
-            continue
-        results.append(
-            {
-                "카테고리": classify(item["name"], item["brand"]),
-                "순위": rank,
-                "상품명": item["name"],
-                "브랜드": item["brand"],
-                "가격": item["price"],
-                "상품URL": item["href"],
-                "이미지URL": item["image"],
-            }
-        )
+        results = []
+        for rank, item in enumerate(items, start=1):
+            if not item["name"]:
+                continue
+            results.append(
+                {
+                    "카테고리": classify(item["name"], item["brand"]),
+                    "순위": rank,
+                    "상품명": item["name"],
+                    "브랜드": item["brand"],
+                    "가격": item["price"],
+                    "상품URL": item["href"],
+                    "이미지URL": item["image"],
+                }
+            )
+
+        # 리뷰 수집은 이미 Cloudflare를 통과한 이 드라이버 세션 안에서만 가능하므로
+        # driver가 닫히기 전에(with 블록 안에서) 상세페이지를 순회해 처리한다.
+        # 목록페이지 로딩(8~20초) 동안 쌓인 성능 로그를 먼저 비워야 각 상품의
+        # 리뷰 API 응답을 이전 페이지의 로그 더미에 묻히지 않고 정확히 잡아낼 수 있다.
+        driver.get_log("performance")
+        for result in results:
+            if result["상품URL"]:
+                result.update(fetch_oliveyoung_review_material(driver, result["상품URL"]))
+
     return results

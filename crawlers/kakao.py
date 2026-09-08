@@ -15,6 +15,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from crawlers.base import USER_AGENT, new_driver
 from crawlers.classifier import classify
 from crawlers.config import PLATFORMS
+from crawlers.review import fetch_kakao_review_material
 
 BASE_URL = "https://gift.kakao.com"
 ITEM_SELECTOR = "gc-product"
@@ -72,5 +73,9 @@ def crawl_kakao() -> list[dict]:
                         "이미지URL": _fetch_og_image(product_url) if product_url else "",
                     }
                 )
+
+    for item in results:
+        if item["상품URL"]:
+            item.update(fetch_kakao_review_material(item["상품URL"]))
 
     return results

@@ -12,6 +12,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from crawlers.base import new_driver
 from crawlers.classifier import classify
 from crawlers.config import PLATFORMS
+from crawlers.review import fetch_daiso_review_material
 
 BASE_URL = "https://www.daisomall.co.kr"
 RANK_SELECTOR = ".nav-rank .swiper-slide"
@@ -82,4 +83,9 @@ def crawl_daiso() -> list[dict]:
                 "이미지URL": item["image"],
             }
         )
+
+    for item in results:
+        if item["상품URL"]:
+            item.update(fetch_daiso_review_material(item["상품URL"]))
+
     return results

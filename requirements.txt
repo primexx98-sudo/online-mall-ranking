@@ -4,3 +4,4 @@ openpyxl==3.1.5
 requests==2.31.0
 beautifulsoup4==4.12.3
 Pillow==12.2.0
+google-genai==2.13.0

@@ -12,7 +12,9 @@ USER_AGENT = (
 
 
 @contextmanager
-def new_driver():
+def new_driver(network_logging: bool = False):
+    """network_logging=True는 리뷰 API 응답(JSON)을 CDP 성능 로그로 가로채야 하는
+    올리브영 리뷰 수집 전용 — 다른 크롤러는 기본값(False)으로 오버헤드 없이 그대로 쓴다."""
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
@@ -22,6 +24,8 @@ def new_driver():
     options.add_argument(f"user-agent={USER_AGENT}")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
+    if network_logging:
+        options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
     driver = webdriver.Chrome(options=options)
     driver.execute_cdp_cmd(
