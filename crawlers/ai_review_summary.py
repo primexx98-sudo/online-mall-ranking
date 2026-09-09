@@ -11,11 +11,14 @@ import json
 import os
 import time
 
-MODEL = "gemini-3.6-flash"
-# 2026-09-09: gemini-flash-latest가 5회 연속(09-08 4회 + 09-09 1회) 503 UNAVAILABLE
-# 반환 - 별칭이 가리키는 최신 버전이 지속 과부하 상태로 추정되어 안정된 고정 버전으로
-# 전환 시도. 1차로 시도한 gemini-2.5-flash는 이미 폐지되어 404 NOT_FOUND(같은 날
-# 재확인) - 최신도 폐지도 아닌 중간 세대 안정 버전(gemini-3.6-flash)으로 재전환.
+MODEL_CANDIDATES = ["gemini-3.6-flash", "gemini-flash-latest", "gemini-3.5-flash"]
+# 2026-09-09: gemini-flash-latest가 5회 연속(09-08 4회 + 09-09 1회) 503 UNAVAILABLE만
+# 반환한 사례 대응 — 같은 모델만 재시도해봐야 그 모델 자체가 문제면 소용없으므로,
+# 실패 시 다른 세대의 모델로 갈아타며 재시도한다(1차 시도했던 gemini-2.5-flash는
+# 이미 폐지돼 404 NOT_FOUND였던 것도 같은 맥락 — 폐지/과부하 둘 다 모델 교체가 답).
+# 1순위를 gemini-3.6-flash로 둔 건 이날 실제로 정상 작동을 확인했기 때문(가장 안전한
+# 기본값), gemini-flash-latest는 별칭이라 세대 교체를 자동으로 따라가는 장점이 있어
+# 2순위 폴백으로, gemini-3.5-flash는 더 오래된 안정판이라 최종 폴백으로 둠.
 MAX_REVIEWS_PER_PRODUCT_IN_PROMPT = 12
 MAX_REVIEW_CHARS = 200
 
@@ -54,23 +57,27 @@ def _build_items_block(items: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
-def _generate_with_retry(client, prompt: str, max_retries: int = 2) -> str | None:
-    for attempt in range(max_retries + 1):
-        try:
-            response = client.models.generate_content(model=MODEL, contents=prompt)
-            return response.text
-        except Exception as e:
-            msg = str(e)
-            if "RESOURCE_EXHAUSTED" in msg:
-                print(f"[리뷰요약] Gemini 하루 호출 한도 초과 - 재시도 없이 포기 ({msg[:100]})")
-                return None
-            if attempt < max_retries:
-                wait = 2 * (attempt + 1)
-                print(f"[리뷰요약] Gemini 일시 오류, {wait}초 후 재시도 ({msg[:100]})")
-                time.sleep(wait)
-            else:
-                print(f"[리뷰요약] Gemini 호출 최종 실패: {msg[:100]}")
-                return None
+def _generate_with_retry(client, prompt: str, max_retries_per_model: int = 1) -> str | None:
+    """모델 후보를 순서대로 시도한다. 일시 오류(503 등)는 같은 모델로 잠깐 재시도 후
+    포기하고 다음 후보로, 429(하루 한도 초과)는 같은 모델 재시도가 무의미하므로
+    바로 다음 후보로, 404(모델 폐지) 등도 마찬가지로 다음 후보로 넘어간다."""
+    for model in MODEL_CANDIDATES:
+        for attempt in range(max_retries_per_model + 1):
+            try:
+                response = client.models.generate_content(model=model, contents=prompt)
+                return response.text
+            except Exception as e:
+                msg = str(e)
+                if "RESOURCE_EXHAUSTED" in msg:
+                    print(f"[리뷰요약] {model} 하루 호출 한도 초과 - 다음 후보 모델로 전환 ({msg[:100]})")
+                    break
+                if attempt < max_retries_per_model:
+                    wait = 2 * (attempt + 1)
+                    print(f"[리뷰요약] {model} 일시 오류, {wait}초 후 재시도 ({msg[:100]})")
+                    time.sleep(wait)
+                else:
+                    print(f"[리뷰요약] {model} 최종 실패, 다음 후보 모델로 전환: {msg[:100]}")
+    print("[리뷰요약] 모든 후보 모델 실패 - 포기")
     return None
 
 
