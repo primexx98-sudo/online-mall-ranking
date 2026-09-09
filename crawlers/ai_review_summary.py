@@ -11,10 +11,11 @@ import json
 import os
 import time
 
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-3.6-flash"
 # 2026-09-09: gemini-flash-latest가 5회 연속(09-08 4회 + 09-09 1회) 503 UNAVAILABLE
 # 반환 - 별칭이 가리키는 최신 버전이 지속 과부하 상태로 추정되어 안정된 고정 버전으로
-# 전환. gemini-2.5-flash는 2026-10-16 지원 종료 예정이므로 그 전에 재점검 필요.
+# 전환 시도. 1차로 시도한 gemini-2.5-flash는 이미 폐지되어 404 NOT_FOUND(같은 날
+# 재확인) - 최신도 폐지도 아닌 중간 세대 안정 버전(gemini-3.6-flash)으로 재전환.
 MAX_REVIEWS_PER_PRODUCT_IN_PROMPT = 12
 MAX_REVIEW_CHARS = 200
 
