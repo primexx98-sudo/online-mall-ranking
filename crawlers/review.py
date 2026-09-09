@@ -16,6 +16,12 @@ import requests
 from crawlers.base import USER_AGENT
 
 MAX_REVIEWS_PER_PRODUCT = 15
+# 2026-09-09: 카카오 sortProperty="SCORE", 다이소 sortCond="RCM"(추천순)으로 가져오던
+# 초기 구현이 부정 리뷰를 체계적으로 걸러내고 있었음이 라이브 테스트로 드러남 — 같은
+# 상품을 "SCORE"/"RCM"으로 조회하면 별점이 좁은 범위(4~5점)에만 몰리는데, "LATEST"로
+# 바꾸면 같은 상품에서 1~2점 리뷰가 그대로 잡힘(사용자가 "부정 리뷰가 너무 없다"고
+# 지적해 확인). 그 결과 ai_review_summary.py가 실제로는 존재하는 부정 포인트를 못
+# 찾아 "특별한 불만이 발견되지 않았어요"만 계속 뜨는 원인이었음 — 최신순으로 전환.
 
 
 # ---------------------------------------------------------------- 카카오선물하기 ----
@@ -37,7 +43,7 @@ def fetch_kakao_review_material(product_url: str) -> dict:
         ).json()
         review_list = requests.get(
             f"https://gift.kakao.com/a/product-detail/v2/review/products/{product_id}",
-            params={"page": 0, "sortProperty": "SCORE", "size": MAX_REVIEWS_PER_PRODUCT},
+            params={"page": 0, "sortProperty": "LATEST", "size": MAX_REVIEWS_PER_PRODUCT},
             headers=headers, timeout=10,
         ).json()
     except Exception:
@@ -82,7 +88,7 @@ def fetch_daiso_review_material(product_url: str) -> dict:
             headers=headers,
             json={
                 "pdNo": pdno, "pageSize": MAX_REVIEWS_PER_PRODUCT, "currentPage": 1,
-                "filter": "ALL", "sortCond": "RCM", "useCommonPaging": False,
+                "filter": "ALL", "sortCond": "LATEST", "useCommonPaging": False,
                 "cttsOnlyYn": "N", "onldPdNoList": [],
             },
             timeout=10,
