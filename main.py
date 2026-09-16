@@ -5,6 +5,7 @@ python main.py TEST          # data/daily/TEST/TEST.xlsx 로 저장 (실제 날�
 """
 
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +20,27 @@ from crawlers.notify import notify_kakao_failure
 from crawlers.oliveyoung import crawl_oliveyoung
 
 DATA_DIR = Path(__file__).parent / "data" / "daily"
+
+MAX_ATTEMPTS = 3  # 최초 1회 + 재시도 2회
+RETRY_DELAY_SECONDS = 60  # Cloudflare 등 일시적 차단이 풀릴 시간을 벌기 위한 대기
+
+
+def crawl_with_retry(name: str, crawl_fn) -> list[dict] | None:
+    """일시적 차단(Cloudflare 등)을 감안해 최대 MAX_ATTEMPTS회까지 재시도한다.
+    매 시도가 crawl_fn() 전체를 다시 호출해 새 브라우저 세션을 여는 방식이라,
+    이전 시도에서 차단된 쿠키/세션 상태를 물려받지 않는다. 모두 실패하면 None."""
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            items = crawl_fn()
+            if not items:
+                raise RuntimeError("수집 결과 0건")
+            return items
+        except Exception as e:
+            print(f"[FAIL] {name} {attempt}/{MAX_ATTEMPTS}차 시도: {e}")
+            if attempt < MAX_ATTEMPTS:
+                print(f"[RETRY] {name}: {RETRY_DELAY_SECONDS}초 후 재시도")
+                time.sleep(RETRY_DELAY_SECONDS)
+    return None
 
 
 def load_existing_platform_data(date_str: str, platform_names: list[str]) -> dict[str, list[dict]]:
@@ -143,14 +165,11 @@ def main() -> None:
         ("다이소몰", crawl_daiso),
         ("올리브영", crawl_oliveyoung),
     ]:
-        try:
-            items = crawl_fn()
-            if not items:
-                raise RuntimeError("수집 결과 0건")
+        items = crawl_with_retry(name, crawl_fn)
+        if items:
             platform_data[name] = items
             print(f"[OK] {name}: {len(items)}건")
-        except Exception as e:
-            print(f"[FAIL] {name}: {e}")
+        else:
             failed.append(name)
             if name in existing_data:
                 platform_data[name] = existing_data[name]
@@ -158,7 +177,7 @@ def main() -> None:
 
     if not platform_data:
         print("모든 플랫폼 수집 실패 - 저장 생략")
-        notify_kakao_failure(failed, date_str)
+        notify_kakao_failure(failed, date_str, attempts=MAX_ATTEMPTS)
         sys.exit(1)
 
     # AI 긍정/부정 요약은 오늘 새로 수집된 상품에만 실행한다 — fallback(기존 성공분)
@@ -178,7 +197,7 @@ def main() -> None:
         # 데이터가 실제로 비어버림) 알림 대상.
         truly_failed = [name for name in failed if name not in existing_data]
         if truly_failed:
-            notify_kakao_failure(truly_failed, date_str)
+            notify_kakao_failure(truly_failed, date_str, attempts=MAX_ATTEMPTS)
         else:
             print("[알림 생략] 실패한 플랫폼 모두 기존 성공분으로 대체되어 데이터 유실 없음")
         sys.exit(1)

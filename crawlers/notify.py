@@ -41,8 +41,10 @@ def _get_access_token() -> str | None:
     return resp.json()["access_token"]
 
 
-def notify_kakao_failure(failed: list[str], date_str: str) -> None:
-    """실패한 플랫폼이 있을 때 카카오톡으로 알림을 보낸다.
+def notify_kakao_failure(failed: list[str], date_str: str, attempts: int = 1) -> None:
+    """실패한 플랫폼이 있을 때 카카오톡으로 알림을 보낸다. main.py의
+    crawl_with_retry가 attempts회 모두 실패한 뒤에만 이 함수를 호출하므로,
+    "재시도까지 다 해봤지만 안 됐다"는 걸 문구에 그대로 반영한다.
 
     알림 자체의 실패(토큰 미설정, API 오류 등)는 예외를 삼키고 print만
     남긴다 — 알림 실패가 크롤링/저장 실패로 번지면 안 됨.
@@ -55,6 +57,7 @@ def notify_kakao_failure(failed: list[str], date_str: str) -> None:
 
         text = (
             f"[온라인몰 랭킹] {date_str} 수집 실패: {', '.join(failed)}\n"
+            f"(각 {attempts}회 시도 모두 실패)\n"
             "크롤러_실패시.md 절차 참고"
         )
         template_object = {
