@@ -9,7 +9,7 @@ PLATFORMS = {
         "top_n": 10,
     },
     "다이소몰": {
-        "url": "https://www.daisomall.co.kr/ds/exhCtgr/C208/CTGR_00022/CTGR_01020",
+        "url": "https://www.daisomall.co.kr/ds/exhCtgr/C208/CTGR_00022/CTGR_01020/CTGR_01031",
         "top_n": 10,
     },
     "올리브영": {
